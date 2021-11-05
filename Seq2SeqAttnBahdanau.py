@@ -134,7 +134,7 @@ class DecoderGRU(nn.Module):
 		# context: [1, batch size, bidirectional * encoder_hidden_dim]
 		context = context.permute(1, 0, 2)
 
-		# rnn_input: [1, batch size, decoder_embed_dim + bidireetional * encoder_hidden_dim]
+		# rnn_input: [1, batch size, decoder_embed_dim + bidirectional * encoder_hidden_dim]
 		rnn_input = torch.cat((embedded, context), dim=-1)
 
 		# output = [seq length, batch size, decoder_hidden_dim]
