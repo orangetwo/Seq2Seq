@@ -17,13 +17,14 @@ class EncoderGRU(nn.Module):
 	hidden_{-1} = [0] * hidden_dim
 	"""
 
-	def __init__(self, encoder_vocab_size: int, encoder_hidden_dim: int, decoder_hidden_dim: int, n_layer=1,
+	def __init__(self, encoder_vocab_size: int, encoder_embed_dim: int, encoder_hidden_dim: int,
+	             decoder_hidden_dim: int, n_layer=1,
 	             bidirectional=False, dropout=0.5):
 		super(EncoderGRU, self).__init__()
 		self.bidirectional = bidirectional
-		self.embedding = nn.Embedding(encoder_vocab_size, encoder_hidden_dim)
+		self.embedding = nn.Embedding(encoder_vocab_size, encoder_embed_dim)
 		self.dropout = nn.Dropout(p=dropout)
-		self.gru = nn.GRU(encoder_hidden_dim, encoder_hidden_dim, n_layer, bidirectional=self.bidirectional)
+		self.gru = nn.GRU(encoder_embed_dim, encoder_hidden_dim, n_layer, bidirectional=self.bidirectional)
 		if self.bidirectional:
 			self.fc = nn.Linear(2 * encoder_hidden_dim, decoder_hidden_dim)
 		else:
@@ -31,6 +32,7 @@ class EncoderGRU(nn.Module):
 
 	def forward(self, src):
 		# words_inputs : [seq length, batch size]
+		# embedded: [seq length, batch size, encoder_embed_dim]
 		seq_len = len(src)
 		embedded = self.dropout(self.embedding(src))
 
@@ -57,7 +59,7 @@ class BahdanauAttention(nn.Module):
 	"""
 	q: s_{i-1}
 	k, v: h
-	采用的为 加性注意力机制 V * tanh(W * p + U * q)
+	采用的为 加性注意力机制 V * tanh(W * h + U * q)
 
 	"""
 
@@ -88,17 +90,69 @@ class BahdanauAttention(nn.Module):
 
 
 class DecoderGRU(nn.Module):
-	def __init__(self, decoder_vocab_size: int, encoder_hidden_dim: int, decoder_hidden_dim: int, attention, dropout=0.5,
-	             tie_weight=False):
+	def __init__(self, decoder_vocab_size: int, decoder_embed_dim: int, encoder_hidden_dim: int,
+	             decoder_hidden_dim: int, attention, dropout=0.5,
+	             tie_weight=False, bidirectional=False):
 		super(DecoderGRU, self).__init__()
 
-		self.embedding = nn.Embedding(decoder_vocab_size, decoder_hidden_dim)
+		self.embedding = nn.Embedding(decoder_vocab_size, decoder_embed_dim)
 		self.attention = attention
+		self.dropout = nn.Dropout(dropout)
+		self.D = 2 if bidirectional else 1
+		self.gru = nn.GRU(decoder_hidden_dim + bidirectional * decoder_embed_dim, decoder_hidden_dim)
+		self.pre_softmax = nn.Linear(self.D * encoder_hidden_dim + decoder_hidden_dim + decoder_embed_dim,
+		                             decoder_vocab_size)
 
+		if tie_weight:
+			# since embedding shape != pre softmax layer shape, tying weight cannot be used
+			pass
 
+	def forward(self, decoder_input, decoder_hidden, encoder_output):
+		"""
+		trg: [batch size]
+		hidden: [batch size, decoder_hidden_dim]
+		encoder_output: [seq length, batch size, bidirectional * encoder_hidden_dim]
+		"""
 
+		decoder_input = decoder_input.unsqueeze(0)
+
+		# embedded: [1, batch size, decoder_embed_dim]
+		embedded = self.dropout(self.embedding(decoder_input))
+
+		# weights: [batch size, seq length]
+		weights = self.attention(decoder_hidden, encoder_output)
+
+		# weights: [batch size, 1, seq length]
+		weights = weights.unsqueeze(1)
+
+		# encoder_output: [batch size, seq length, bidirectional * encoder_hidden_dim]
+		encoder_output = encoder_output.permute(1, 0, 2)
+
+		# context: [batch size, 1, bidirectional * encoder_hidden_dim]
+		context = torch.bmm(weights, encoder_output)
+
+		# context: [1, batch size, bidirectional * encoder_hidden_dim]
+		context = context.permute(1, 0, 2)
+
+		# rnn_input: [1, batch size, decoder_embed_dim + bidireetionae * encoder_hidden_dim]
+		rnn_input = torch.cat((embedded, context), dim=-1)
+
+		# output = [seq length, batch size, decoder_hidden_dim]
+		# hidden = [1, batch size, decoder_hidden_dim]
+		# since seq length equals 1, so
+		# output = [1, batch size, decoder_hidden_dim]
+		output, hidden = self.gru(rnn_input, decoder_hidden.unsqueeze(0))
+		assert (output == hidden).all()
+
+		context = context.squeeze(0)
+		output = output.squeeze(0)
+		embedded = embedded.squeeze(0)
+
+		predict = self.pre_softmax(torch.cat((context, output, embedded), dim=-1))
+
+		return predict, hidden.unsqueeze(0)
 
 
 if __name__ == '__main__':
-	gru = EncoderGRU(100, 5, 2, bidirectional=False)
+	gru = EncoderGRU(100, 5, 3, 2, bidirectional=False)
 	gru(torch.tensor([[1], [2], [4]], dtype=torch.long))
