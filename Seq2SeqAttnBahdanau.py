@@ -99,7 +99,8 @@ class DecoderGRU(nn.Module):
 		self.attention = attention
 		self.dropout = nn.Dropout(dropout)
 		self.D = 2 if bidirectional else 1
-		self.gru = nn.GRU(decoder_hidden_dim + bidirectional * decoder_embed_dim, decoder_hidden_dim)
+		# self.gru = nn.GRU(decoder_hidden_dim + bidirectional * decoder_embed_dim, decoder_hidden_dim)
+		self.gru = nn.GRU(decoder_embed_dim + bidirectional * encoder_hidden_dim, decoder_hidden_dim)
 		self.pre_softmax = nn.Linear(self.D * encoder_hidden_dim + decoder_hidden_dim + decoder_embed_dim,
 		                             decoder_vocab_size)
 
